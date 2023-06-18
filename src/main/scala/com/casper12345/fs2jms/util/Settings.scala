@@ -1,30 +1,43 @@
 package com.casper12345.fs2jms.util
 
-import cats.effect.{Sync, Resource}
+import cats.effect.{Resource, Sync}
 import com.typesafe.scalalogging.StrictLogging
 import cats.implicits._
-import javax.jms.{Connection, ConnectionFactory}
+import javax.jms.{ConnectionFactory, JMSContext}
 
-case class ProducerSettings(
+final case class SecuritySettings(
+ password: String,
+ userName: String
+)
+
+trait Settings {
+  val connectionFactory: ConnectionFactory
+  val securitySettings: Option[SecuritySettings]
+  def createContext: JMSContext =
+    securitySettings.fold(
+      connectionFactory.createContext()
+    )(s => connectionFactory.createContext(s.userName, s.password))
+}
+
+final case class ProducerSettings(
   connectionFactory: ConnectionFactory,
-  transacted: Boolean,
-  acknowledgeMode: Int,
+  securitySettings: Option[SecuritySettings] = None,
   deliveryMode: Int,
   queue: String
-)
+) extends Settings
 
-case class ConsumerSettings(
+final case class ConsumerSettings(
   connectionFactory: ConnectionFactory,
-  transacted: Boolean,
-  acknowledgeMode: Int,
+  securitySettings: Option[SecuritySettings] = None,
   queue: String
-)
+) extends Settings
 
 object Util extends StrictLogging {
 
-  def createConnection[F[_] : Sync](connectionFactory: => ConnectionFactory): Resource[F, Connection] =
-    Resource.make(Sync[F].blocking(connectionFactory.createConnection()) <* Sync[F].delay(logger.info("creating amq connection")))(
-      conn => Sync[F].blocking(conn.close()) <* Sync[F].delay(logger.info("closing amq connection"))
+  def createContext[F[_] : Sync](settings: => Settings): Resource[F, JMSContext] = {
+    Resource.make(Sync[F].blocking(settings.createContext) <* Sync[F].delay(logger.info("creating jms context")))(
+      conn => Sync[F].blocking(conn.close()) <* Sync[F].delay(logger.info("closing jms context"))
     )
+  }
 
 }

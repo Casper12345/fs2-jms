@@ -11,7 +11,7 @@ import org.scalatest.flatspec.AsyncFlatSpec
 import org.scalatest.matchers.should.Matchers
 import java.io
 import java.io.Serializable
-import javax.jms.{DeliveryMode, Message, ObjectMessage, Session}
+import javax.jms.{DeliveryMode, Message, ObjectMessage}
 import scala.collection.mutable.ListBuffer
 import scala.concurrent.duration.DurationInt
 
@@ -29,16 +29,14 @@ class JmsProducerConsumerTest extends AsyncFlatSpec with AsyncIOSpec with Matche
 
     val producerSettings = ProducerSettings(
       connectionFactory,
-      transacted = false,
-      Session.AUTO_ACKNOWLEDGE,
+      None,
       DeliveryMode.NON_PERSISTENT,
       queue
     )
 
     val consumerSettings = ConsumerSettings(
       connectionFactory,
-      transacted = false,
-      Session.AUTO_ACKNOWLEDGE,
+      None,
       queue
     )
 
@@ -48,8 +46,8 @@ class JmsProducerConsumerTest extends AsyncFlatSpec with AsyncIOSpec with Matche
     val offerToSource: Resource[IO, (Serializable, Message => Message) => IO[Unit]] = producer.map {
       io => (serializable: Serializable, m: Message => Message) =>
         {
-          io.flatMap { case (offer, session) =>
-            offer(m(session.createObjectMessage(serializable)))
+          io.flatMap { case (offer, context) =>
+            offer(m(context.createObjectMessage(serializable)))
           }
         }
     }
@@ -213,8 +211,8 @@ class JmsProducerConsumerTest extends AsyncFlatSpec with AsyncIOSpec with Matche
     val ots: Resource[IO, (String, Message => Message) => IO[Unit]] = f.producer.map {
       io => (s: String, m: Message => Message) =>
         {
-          io.flatMap { case (offer, session) =>
-            offer(m(session.createTextMessage(s)))
+          io.flatMap { case (offer, context) =>
+            offer(m(context.createTextMessage(s)))
           }
         }
     }

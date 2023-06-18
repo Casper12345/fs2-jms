@@ -21,7 +21,6 @@ lazy val root = (project in file("."))
     assembly / test := {},
     assembly / assemblyMergeStrategy := {
         case PathList("META-INF", _*) => MergeStrategy.discard
-        case "module-info.class" => MergeStrategy.discard
         case "LICENSE-2.0.txt" => MergeStrategy.discard
         case _ => MergeStrategy.first
     },

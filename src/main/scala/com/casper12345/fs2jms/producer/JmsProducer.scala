@@ -7,29 +7,30 @@ import cats.effect.kernel.implicits._
 import com.casper12345.fs2jms.util.{ProducerSettings, Util}
 import com.typesafe.scalalogging.StrictLogging
 import fs2.Stream
-import javax.jms.{Message, Session}
+import javax.jms.{JMSContext, Message}
 
 class JmsProducer[F[_] : Async](settings: ProducerSettings) extends StrictLogging {
   private def logException(t: Throwable): F[Unit] = Sync[F].delay(logger.error("Message producer caught exception", t))
 
-  private val connection = Util.createConnection(settings.connectionFactory)
+  private val context = Util.createContext(settings)
 
-  private val producerStream: Resource[F, F[(F[Unit], Session, Message => F[Unit])]] =
-    connection.map { conn =>
+  private val producerStream: Resource[F, F[(F[Unit], JMSContext, Message => F[Unit])]] =
+    context.map { con =>
       for {
-        _           <- Sync[F].blocking(conn.start())
-        session     <- Sync[F].blocking(conn.createSession(settings.transacted, settings.acknowledgeMode))
-        destination <- Sync[F].blocking(session.createQueue(settings.queue))
-        producer    <- Sync[F].blocking(session.createProducer(destination))
+        _           <- Sync[F].blocking(con.start())
+        destination <- Sync[F].blocking(con.createQueue(settings.queue))
+        producer    <- Sync[F].blocking(con.createProducer)
         _           <- Sync[F].delay(producer.setDeliveryMode(settings.deliveryMode))
         messageQueue <- Queue.unbounded[F, Message].map { queue =>
                           (
                             Stream
                               .fromQueueUnterminated(queue)
-                              .evalMap(m => Sync[F].blocking(producer.send(m)).handleErrorWith(logException))
+                              .evalMap(m =>
+                                Sync[F].blocking(producer.send(destination, m)).void.handleErrorWith(logException)
+                              )
                               .compile
                               .drain,
-                            session,
+                            con,
                             queue.offer _
                           )
                         }
@@ -38,10 +39,10 @@ class JmsProducer[F[_] : Async](settings: ProducerSettings) extends StrictLoggin
       }
     }
 
-  private val producerIO: Resource[F, F[(Message => F[Unit], Session)]] =
+  private val producerIO: Resource[F, F[(Message => F[Unit], JMSContext)]] =
     producerStream.flatMap(io =>
-      Resource.suspend(io.map { case (str, session, fun) =>
-        str.background.map(_ => Sync[F].delay((fun, session)))
+      Resource.suspend(io.map { case (str, con, fun) =>
+        str.background.map(_ => Sync[F].delay((fun, con)))
       })
     )
 
@@ -50,5 +51,5 @@ class JmsProducer[F[_] : Async](settings: ProducerSettings) extends StrictLoggin
 object JmsProducer {
   def apply[F[_] : Async](
     settings: ProducerSettings
-  ): Resource[F, F[(Message => F[Unit], Session)]] = new JmsProducer(settings).producerIO
+  ): Resource[F, F[(Message => F[Unit], JMSContext)]] = new JmsProducer(settings).producerIO
 }

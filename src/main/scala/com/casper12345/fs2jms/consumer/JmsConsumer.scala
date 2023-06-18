@@ -4,13 +4,14 @@ import cats.effect.{Async, Resource, Sync}
 import cats.implicits._
 import com.casper12345.fs2jms.util.{ConsumerSettings, IllegalJmsMessageException, Util}
 import fs2.Stream
-import javax.jms.{Message, MessageConsumer}
+
+import javax.jms.{Connection, JMSConsumer, Message, MessageConsumer}
 
 class JmsConsumer[F[_] : Sync, A <: Message: Manifest](settings: ConsumerSettings) {
 
-  private val connection = Util.createConnection[F](settings.connectionFactory)
+  private val connection = Util.createContext[F](settings)
 
-  private def receive(consumer: MessageConsumer): F[A] = Sync[F].blocking(consumer.receive).flatMap {
+  private def receive(consumer: JMSConsumer): F[A] = Sync[F].blocking(consumer.receive).flatMap {
     case message: A => Sync[F].delay(message)
     case x          => Sync[F].raiseError(IllegalJmsMessageException(s"Received message of unsupported type: ${x.getClass.toString}"))
   }
@@ -19,9 +20,9 @@ class JmsConsumer[F[_] : Sync, A <: Message: Manifest](settings: ConsumerSetting
     connection.map { conn =>
       for {
         _           <- Sync[F].blocking(conn.start())
-        session     <- Sync[F].blocking(conn.createSession(settings.transacted, settings.acknowledgeMode))
-        destination <- Sync[F].blocking(session.createQueue(settings.queue))
-        consumer    <- Sync[F].blocking(session.createConsumer(destination))
+        _           <- Sync[F].blocking(conn)
+        destination <- Sync[F].blocking(conn.createQueue(settings.queue))
+        consumer    <- Sync[F].blocking(conn.createConsumer(destination))
       } yield Stream.repeatEval(receive(consumer).attempt)
     }
 
